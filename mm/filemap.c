@@ -2359,7 +2359,7 @@ generic_file_direct_write(struct kiocb *iocb, struct iov_iter *from, loff_t pos)
 
 	write_len = iov_iter_count(from);
 	end = (pos + write_len - 1) >> PAGE_CACHE_SHIFT;
-
+	/* 将对应区域page cache中的新数据页刷新到设备，这个操作是同步的 */
 	written = filemap_write_and_wait_range(mapping, pos, pos + write_len - 1);
 	if (written)
 		goto out;
@@ -2370,7 +2370,9 @@ generic_file_direct_write(struct kiocb *iocb, struct iov_iter *from, loff_t pos)
 	 * about to write.  We do this *before* the write so that we can return
 	 * without clobbering -EIOCBQUEUED from ->direct_IO().
 	 */
+	/* 将page cache对应page 缓存无效掉，这样可以保证后继的读操作能从磁盘获取最新数据 */
 	if (mapping->nrpages) {
+		 /* 无效对应的page缓存 */
 		written = invalidate_inode_pages2_range(mapping,
 					pos >> PAGE_CACHE_SHIFT, end);
 		/*
@@ -2385,6 +2387,7 @@ generic_file_direct_write(struct kiocb *iocb, struct iov_iter *from, loff_t pos)
 	}
 
 	data = *from;
+	/* 调用ext3文件系统的direct io方法，将数据写入磁盘 */ 
 	written = mapping->a_ops->direct_IO(WRITE, iocb, &data, pos);
 
 	/*
@@ -2395,6 +2398,7 @@ generic_file_direct_write(struct kiocb *iocb, struct iov_iter *from, loff_t pos)
 	 * so we don't support it 100%.  If this invalidation
 	 * fails, tough, the write still worked...
 	 */
+	/* 再次无效掉由于预读操作导致的对应地址的page cache缓存页 */  
 	if (mapping->nrpages) {
 		invalidate_inode_pages2_range(mapping,
 					      pos >> PAGE_CACHE_SHIFT, end);
@@ -2440,6 +2444,7 @@ ssize_t generic_perform_write(struct file *file,
 				struct iov_iter *i, loff_t pos)
 {
 	struct address_space *mapping = file->f_mapping;
+	/* 映射处理函数集 */ 
 	const struct address_space_operations *a_ops = mapping->a_ops;
 	long status = 0;
 	ssize_t written = 0;
@@ -2482,7 +2487,7 @@ again:
 			status = -EINTR;
 			break;
 		}
-
+		 /* 调用ext3中的write_begin函数（inode.c中）ext3_write_begin， 如果写入的page页不存在，那么ext3_write_begin会创建一个Page页，然后从硬盘中读入相应的数据 */  
 		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
 						&page, &fsdata);
 		if (unlikely(status < 0))
@@ -2490,10 +2495,10 @@ again:
 
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
-
+		 /* 将数据拷贝到page cache中 */
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
 		flush_dcache_page(page);
-
+		/* 调用ext3的write_end函数（inode.c中），写完数据之后会将page页标识为dirty，后台writeback线程会将dirty page刷新到设备 */  
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
 						page, fsdata);
 		if (unlikely(status < 0))
@@ -2556,10 +2561,11 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	/* We can write back this queue in page reclaim */
 	current->backing_dev_info = mapping->backing_dev_info;
+	/* 边界检查，需要判断写入数据是否超界、小文件边界检查以及设备是否是read-only。如果超界，那么降低写入数据长度 */  
 	err = generic_write_checks(file, &pos, &count, S_ISBLK(inode->i_mode));
 	if (err)
 		goto out;
-
+	/* count为实际可以写入的数据长度，如果写入数据长度为0，直接结束 */
 	if (count == 0)
 		goto out;
 
@@ -2575,18 +2581,22 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	/* coalesce the iovecs and go direct-to-BIO for O_DIRECT */
 	if (unlikely(file->f_flags & O_DIRECT)) {
+		 /* Direct IO操作模式，该模式会bypass Page Cache，直接将数据写入磁盘设备 */ 
 		loff_t endbyte;
-
+		/* 将对应page cache无效掉，然后将数据直接写入磁盘 */  
 		written = generic_file_direct_write(iocb, from, pos);
 		if (written < 0 || written == count)
+			 /* 所有数据已经写入磁盘，正确返回 */  
 			goto out;
 
 		/*
 		 * direct-io write to a hole: fall through to buffered I/O
 		 * for completing the rest of the request.
 		 */
+
 		pos += written;
 		count -= written;
+        /* 有些请求由于没有和块大小（通常为512字节）对齐，那么将无法正确完成direct-io操作。在__blockdev_direct_IO 函数中会检查逻辑地址是否和块大小对齐，__blockdev_direct_IO无法处理不对齐的请求。另外，在ext3逻辑地址和物理块地址映射操作函数ext3_get_block返回失败时，无法完成buffer_head的映射，那么request请求也将无法得到正确处理。所有没有得到处理的请求通过 buffer写的方式得到处理。从这点来看，direct_io并没有完全bypass page cache，在有些情况下是一种写无效模式。generic_file_buffered_write函数完成buffer写，将数据直接写入page cache */  
 
 		status = generic_perform_write(file, from, pos);
 		/*
@@ -2597,6 +2607,7 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		 * will return -EFOO even if some bytes were written.
 		 */
 		if (unlikely(status < 0)) {
+			/* 如果page cache写失败，那么返回写成功的数据长度 */  
 			err = status;
 			goto out;
 		}
@@ -2607,9 +2618,11 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		 * semantics.
 		 */
 		endbyte = pos + status - 1;
+		 /* 将page cache中的数据同步到磁盘 */  
 		err = filemap_write_and_wait_range(file->f_mapping, pos, endbyte);
 		if (err == 0) {
 			written += status;
+			/* 将page cache无效掉，保证下次读操作从磁盘获取数据 */
 			invalidate_mapping_pages(mapping,
 						 pos >> PAGE_CACHE_SHIFT,
 						 endbyte >> PAGE_CACHE_SHIFT);
@@ -2620,6 +2633,7 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 			 */
 		}
 	} else {
+		/* 将数据写入page cache。绝大多数的ext3写操作都会采用page cache写方式，通过后台writeback线程将page cache同步到硬盘 */  
 		written = generic_perform_write(file, from, pos);
 		if (likely(written >= 0))
 			iocb->ki_pos = pos + written;
@@ -2642,6 +2656,7 @@ EXPORT_SYMBOL(__generic_file_write_iter);
 ssize_t generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 {
 	struct file *file = iocb->ki_filp;
+	/* 获取文件inode索引节点 */  
 	struct inode *inode = file->f_mapping->host;
 	ssize_t ret;
 

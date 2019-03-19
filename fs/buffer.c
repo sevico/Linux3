@@ -660,10 +660,12 @@ static void __set_page_dirty(struct page *page,
 	if (page->mapping) {	/* Race with truncate? */
 		WARN_ON_ONCE(warn && !PageUptodate(page));
 		account_page_dirtied(page, mapping);
+		/* 设置radix tree中的Tag标志 */
 		radix_tree_tag_set(&mapping->page_tree,
 				page_index(page), PAGECACHE_TAG_DIRTY);
 	}
 	spin_unlock_irqrestore(&mapping->tree_lock, flags);
+	/* 将inode加入到writeback线程处理的事务队列中 */
 	__mark_inode_dirty(mapping->host, I_DIRTY_PAGES);
 }
 

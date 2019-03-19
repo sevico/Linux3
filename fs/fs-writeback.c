@@ -49,8 +49,8 @@ struct wb_writeback_work {
 	unsigned int for_sync:1;	/* sync(2) WB_SYNC_ALL writeback */
 	enum wb_reason reason;		/* why was writeback initiated? */
 
-	struct list_head list;		/* pending work list */
-	struct completion *done;	/* set if the caller waits */
+	struct list_head list;		/* pending work list 链入bdi-> work_list队列*/
+	struct completion *done;	/* set if the caller waits work完成时通知调用者*/
 };
 
 /**
@@ -1007,16 +1007,18 @@ static long wb_do_writeback(struct bdi_writeback *wb)
 	long wrote = 0;
 
 	set_bit(BDI_writeback_running, &wb->bdi->state);
+	/* 处理等待的work，所有等待work pengding在bdi->work_list上 */ 
 	while ((work = get_next_work_item(bdi)) != NULL) {
 
 		trace_writeback_exec(bdi, work);
-
+		 /* 调用wb_writeback函数处理相应的inode */  
 		wrote += wb_writeback(wb, work);
 
 		/*
 		 * Notify the caller of completion if this is a synchronous
 		 * work item, otherwise just free it.
 		 */
+		 /* 通知上层软件，相应的work已经完成 */  
 		if (work->done)
 			complete(work->done);
 		else
@@ -1026,6 +1028,7 @@ static long wb_do_writeback(struct bdi_writeback *wb)
 	/*
 	 * Check for periodic writeback, kupdated() style
 	 */
+	/* 处理周期性的dirty page刷新作业，buffer cache就会走这条路径，在下面的函数中会创建work，并且调用wb_writeback函数进行处理 */  
 	wrote += wb_check_old_data_flush(wb);
 	wrote += wb_check_background_flush(wb);
 	clear_bit(BDI_writeback_running, &wb->bdi->state);

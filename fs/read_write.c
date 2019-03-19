@@ -453,7 +453,7 @@ ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, lof
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
 	kiocb.ki_nbytes = len;
-
+	//generic_file_aio_write
 	ret = filp->f_op->aio_write(&kiocb, &iov, 1, kiocb.ki_pos);
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&kiocb);
@@ -529,6 +529,7 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		count = ret;
 		file_start_write(file);
 		if (file->f_op->write)
+			//do_sync_write
 			ret = file->f_op->write(file, buf, count, pos);
 		else if (file->f_op->aio_write)
 			ret = do_sync_write(file, buf, count, pos);

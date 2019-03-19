@@ -2036,8 +2036,10 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	if (wbc->nr_to_write <= 0)
 		return 0;
 	if (mapping->a_ops->writepages)
+		/* 如果文件系统定义了writepages方法，调用该方法刷新page cache页 */  
 		ret = mapping->a_ops->writepages(mapping, wbc);
 	else
+		/* ext3没有定义writepages方法，因此调用generic_writepages()函数将page cache中的脏页刷新到磁盘 */  
 		ret = generic_writepages(mapping, wbc);
 	return ret;
 }

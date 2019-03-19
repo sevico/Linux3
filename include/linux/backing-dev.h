@@ -96,12 +96,12 @@ struct backing_dev_info {
 
 	struct bdi_writeback wb;  /* default writeback info for this bdi */
 	spinlock_t wb_lock;	  /* protects work_list & wb.dwork scheduling */
-
+	/* 任务链表 */
 	struct list_head work_list;
 
 	struct device *dev;
 	struct device *owner;
-
+	/* 在laptop模式下应用的定时器 */
 	struct timer_list laptop_mode_wb_timer;
 
 #ifdef CONFIG_DEBUG_FS
