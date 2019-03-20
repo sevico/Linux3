@@ -24,8 +24,10 @@ static int noop_dispatch(struct request_queue *q, int force)
 
 	if (!list_empty(&nd->queue)) {
 		struct request *rq;
+		/* 从调度器的队列头中获取一个request */
 		rq = list_entry(nd->queue.next, struct request, queuelist);
 		list_del_init(&rq->queuelist);
+		/* 将获取的request放入到设备所属的request queue中 */
 		elv_dispatch_sort(q, rq);
 		return 1;
 	}
@@ -35,7 +37,7 @@ static int noop_dispatch(struct request_queue *q, int force)
 static void noop_add_request(struct request_queue *q, struct request *rq)
 {
 	struct noop_data *nd = q->elevator->elevator_data;
-
+/* 将request挂入noop调度器的request queue */
 	list_add_tail(&rq->queuelist, &nd->queue);
 }
 
@@ -93,10 +95,15 @@ static void noop_exit_queue(struct elevator_queue *e)
 
 static struct elevator_type elevator_noop = {
 	.ops = {
+		/* 合并两个request */
 		.elevator_merge_req_fn		= noop_merged_requests,
+		/* 调度一个合适的request进行发送处理 */
 		.elevator_dispatch_fn		= noop_dispatch,
+		/* 将request放入调度器的queue中 */
 		.elevator_add_req_fn		= noop_add_request,
+		/* 获取前一个request */
 		.elevator_former_req_fn		= noop_former_request,
+		/* 获取后一个request */
 		.elevator_latter_req_fn		= noop_latter_request,
 		.elevator_init_fn		= noop_init_queue,
 		.elevator_exit_fn		= noop_exit_queue,

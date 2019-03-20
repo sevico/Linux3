@@ -350,6 +350,7 @@ EXPORT_SYMBOL(elv_rb_find);
  * entry.  rq is sort instead into the dispatch queue. To be used by
  * specific elevators.
  */
+//对request进行排序，插入到合适的位置
 void elv_dispatch_sort(struct request_queue *q, struct request *rq)
 {
 	sector_t boundary;
