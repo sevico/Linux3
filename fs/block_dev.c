@@ -1083,17 +1083,20 @@ EXPORT_SYMBOL(check_disk_change);
 
 void bd_set_size(struct block_device *bdev, loff_t size)
 {
+	 //size为块设备大小
 	unsigned bsize = bdev_logical_block_size(bdev);
 
 	mutex_lock(&bdev->bd_inode->i_mutex);
 	i_size_write(bdev->bd_inode, size);
 	mutex_unlock(&bdev->bd_inode->i_mutex);
+	//bsize不能大于Page size
 	while (bsize < PAGE_CACHE_SIZE) {
 		if (size & bsize)
 			break;
-		bsize <<= 1;
+		bsize <<= 1;//bsize只能取2的幂
 	}
 	bdev->bd_block_size = bsize;
+	 /* 设置buffer cache块大小 */
 	bdev->bd_inode->i_blkbits = blksize_bits(bsize);
 }
 EXPORT_SYMBOL(bd_set_size);

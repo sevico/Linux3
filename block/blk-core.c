@@ -1580,14 +1580,16 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * Check if we can merge with the plugged list before grabbing
 	 * any locks.
 	 */
+	/* 尝试将bio合并到当前plugged的请求队列中 */
 	if (!blk_queue_nomerges(q) &&
 	    blk_attempt_plug_merge(q, bio, &request_count))
 		return;
 
 	spin_lock_irq(q->queue_lock);
-
+	/* elv_merge是核心函数，找到bio前向或者后向合并的请求 */
 	el_ret = elv_merge(q, &req, bio);
 	if (el_ret == ELEVATOR_BACK_MERGE) {
+		/* 进行后向合并操作 */
 		if (bio_attempt_back_merge(q, req, bio)) {
 			elv_bio_merged(q, req, bio);
 			if (!attempt_back_merge(q, req))
@@ -1595,6 +1597,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 			goto out_unlock;
 		}
 	} else if (el_ret == ELEVATOR_FRONT_MERGE) {
+		/* 进行前向合并操作 */
 		if (bio_attempt_front_merge(q, req, bio)) {
 			elv_bio_merged(q, req, bio);
 			if (!attempt_front_merge(q, req))
@@ -1602,7 +1605,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 			goto out_unlock;
 		}
 	}
-
+	/* 无法找到对应的请求实现合并 */
 get_rq:
 	/*
 	 * This sync check and mask will be re-done in init_request_from_bio(),
@@ -1617,6 +1620,7 @@ get_rq:
 	 * Grab a free request. This is might sleep but can not fail.
 	 * Returns with the queue unlocked.
 	 */
+	/* 获取一个empty request请求 */
 	req = get_request(q, rw_flags, bio, GFP_NOIO);
 	if (unlikely(!req)) {
 		bio_endio(bio, -ENODEV);	/* @q is dead */
@@ -1629,6 +1633,7 @@ get_rq:
 	 * We don't worry about that case for efficiency. It won't happen
 	 * often, and the elevators are able to handle it.
 	 */
+	/* 采用bio对request请求进行初始化 */
 	init_request_from_bio(req, bio);
 
 	if (test_bit(QUEUE_FLAG_SAME_COMP, &q->queue_flags))
@@ -1643,16 +1648,21 @@ get_rq:
 		if (!request_count)
 			trace_block_plug(q);
 		else {
+			/* 请求数量达到队列上限值，进行unplug操作 */
 			if (request_count >= BLK_MAX_REQUEST_COUNT) {
 				blk_flush_plug_list(plug, false);
 				trace_block_plug(q);
 			}
 		}
+		/* 将请求加入到队列 */
 		list_add_tail(&req->queuelist, &plug->list);
 		blk_account_io_start(req, true);
 	} else {
+		/* 在新的内核中，如果用户没有调用start_unplug，那么，在IO scheduler中是没有合并的，一旦加入到request queue中，马上执行unplug操作，这个地方个人觉得有点不妥，不如以前的定时调度机制。对于ext3文件系统，在刷写page cache的时候，都需要首先执行start_unplug操作，因此都会进行request/bio的合并操作。 */
 		spin_lock_irq(q->queue_lock);
+		/* 将request加入到调度器中 */
 		add_acct_request(q, req, where);
+		/* 调用底层函数执行unplug操作 */
 		__blk_run_queue(q);
 out_unlock:
 		spin_unlock_irq(q->queue_lock);
@@ -1913,8 +1923,9 @@ void generic_make_request(struct bio *bio)
 	bio_list_init(&bio_list_on_stack);
 	current->bio_list = &bio_list_on_stack;
 	do {
+		/* 获取块设备的请求队列 */
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
-
+		/* 调用对应驱动程序的处理函数 */
 		q->make_request_fn(q, bio);
 
 		bio = bio_list_pop(current->bio_list);

@@ -2009,6 +2009,7 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 				partial = 1;
 		} else {
 			set_buffer_uptodate(bh);
+			/*将page页和inode设置成脏，等待回写调度处理*/
 			mark_buffer_dirty(bh);
 		}
 		clear_buffer_new(bh);
@@ -3050,16 +3051,16 @@ int _submit_bh(int rw, struct buffer_head *bh, unsigned long bio_flags)
 	 * submit_bio -> generic_make_request may further map this bio around
 	 */
 	bio = bio_alloc(GFP_NOIO, 1);
-
-	bio->bi_iter.bi_sector = bh->b_blocknr * (bh->b_size >> 9);
-	bio->bi_bdev = bh->b_bdev;
-	bio->bi_io_vec[0].bv_page = bh->b_page;
-	bio->bi_io_vec[0].bv_len = bh->b_size;
-	bio->bi_io_vec[0].bv_offset = bh_offset(bh);
+	/* 封装BIO */
+	bio->bi_iter.bi_sector = bh->b_blocknr * (bh->b_size >> 9);/* 起始地址 */
+	bio->bi_bdev = bh->b_bdev;/* 访问设备 */
+	bio->bi_io_vec[0].bv_page = bh->b_page;/* 数据buffer地址 */
+	bio->bi_io_vec[0].bv_len = bh->b_size;/* 数据段大小 */
+	bio->bi_io_vec[0].bv_offset = bh_offset(bh);/* 数据在buffer中的offset */
 
 	bio->bi_vcnt = 1;
 	bio->bi_iter.bi_size = bh->b_size;
-
+	/* 设定回调函数 */
 	bio->bi_end_io = end_bio_bh_io_sync;
 	bio->bi_private = bh;
 	bio->bi_flags |= bio_flags;
@@ -3073,6 +3074,7 @@ int _submit_bh(int rw, struct buffer_head *bh, unsigned long bio_flags)
 		rw |= REQ_PRIO;
 
 	bio_get(bio);
+	/* 提交BIO至对应设备，让该设备对应的驱动程序进行进一步处理 */
 	submit_bio(rw, bio);
 
 	if (bio_flagged(bio, BIO_EOPNOTSUPP))

@@ -276,7 +276,7 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 	struct elevator_queue *e = q->elevator;
 	struct hlist_node *next;
 	struct request *rq;
-
+	/* 遍历地址区间内的所有request */
 	hash_for_each_possible_safe(e->hash, rq, next, hash, offset) {
 		BUG_ON(!ELV_ON_HASH(rq));
 
@@ -284,7 +284,7 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 			__elv_rqhash_del(rq);
 			continue;
 		}
-
+		/* 如果地址匹配，那么找到所需的request */
 		if (rq_hash_key(rq) == offset)
 			return rq;
 	}
@@ -427,10 +427,12 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 
 	/*
 	 * First try one-hit cache.
+	 尝试和最近的request进行合并
 	 */
 	if (q->last_merge && elv_rq_merge_ok(q->last_merge, bio)) {
 		ret = blk_try_merge(q->last_merge, bio);
 		if (ret != ELEVATOR_NO_MERGE) {
+			/* 可以和last_merge进行合并 */
 			*req = q->last_merge;
 			return ret;
 		}
@@ -441,13 +443,14 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 
 	/*
 	 * See if our hash lookup can find a potential backmerge.
+	 查找elevator中的后向合并的hash table，获取可以合并的request
 	 */
 	__rq = elv_rqhash_find(q, bio->bi_iter.bi_sector);
 	if (__rq && elv_rq_merge_ok(__rq, bio)) {
 		*req = __rq;
 		return ELEVATOR_BACK_MERGE;
 	}
-
+	/* 查找scheduler检查是否可以进行前向合并，如果可以，那么进行前向合并 */
 	if (e->type->ops.elevator_merge_fn)
 		return e->type->ops.elevator_merge_fn(q, req, bio);
 
@@ -612,12 +615,13 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		where = ELEVATOR_INSERT_BACK;
 
 	switch (where) {
+		/* 将request加入到device request queue的队列前 */
 	case ELEVATOR_INSERT_REQUEUE:
 	case ELEVATOR_INSERT_FRONT:
 		rq->cmd_flags |= REQ_SOFTBARRIER;
 		list_add(&rq->queuelist, &q->queue_head);
 		break;
-
+		/* 将request 加入到device request queue的队列尾 */
 	case ELEVATOR_INSERT_BACK:
 		rq->cmd_flags |= REQ_SOFTBARRIER;
 		elv_drain_elevator(q);
@@ -634,7 +638,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 */
 		__blk_run_queue(q);
 		break;
-
+		/* 尝试对request进行合并操作，如果无法合并将request加入到elevator request queue中 */
 	case ELEVATOR_INSERT_SORT_MERGE:
 		/*
 		 * If we succeed in merging this request with one in the
@@ -644,6 +648,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		if (elv_attempt_insert_merge(q, rq))
 			break;
 	case ELEVATOR_INSERT_SORT:
+	/* 将request加入到elevator request queue中 */
 		BUG_ON(rq->cmd_type != REQ_TYPE_FS);
 		rq->cmd_flags |= REQ_SORTED;
 		q->nr_sorted++;
