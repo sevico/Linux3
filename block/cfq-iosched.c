@@ -3030,11 +3030,11 @@ static void cfq_choose_cfqg(struct cfq_data *cfqd)
 static struct cfq_queue *cfq_select_queue(struct cfq_data *cfqd)
 {
 	struct cfq_queue *cfqq, *new_cfqq = NULL;
-
+	/* 如果cfq调度器当前没有服务的对象，那么直接跳转去选择一个新的cfq_queue */
 	cfqq = cfqd->active_queue;
 	if (!cfqq)
 		goto new_queue;
-
+	/* 如果在cfq中没有request，直接返回 */
 	if (!cfqd->rq_queued)
 		return NULL;
 
@@ -3046,6 +3046,7 @@ static struct cfq_queue *cfq_select_queue(struct cfq_data *cfqd)
 
 	/*
 	 * The active queue has run out of time, expire it and select new.
+	 当前的cfq_queue已经服务到限，重新选择一个新的cfq_queue
 	 */
 	if (cfq_slice_used(cfqq) && !cfq_cfqq_must_dispatch(cfqq)) {
 		/*
@@ -3068,6 +3069,7 @@ static struct cfq_queue *cfq_select_queue(struct cfq_data *cfqd)
 	/*
 	 * The active queue has requests and isn't expired, allow it to
 	 * dispatch.
+	 Cfq_queue还存在很多需要处理的request，继续处理这个cfq_queue
 	 */
 	if (!RB_EMPTY_ROOT(&cfqq->sort_list))
 		goto keep_queue;
@@ -3077,6 +3079,7 @@ static struct cfq_queue *cfq_select_queue(struct cfq_data *cfqd)
 	 * distance, let it run.  The expire code will check for close
 	 * cooperators and put the close queue at the front of the service
 	 * tree.  If possible, merge the expiring queue with the new cfqq.
+	 当前处理的cfq_queue已经超时，需要选择一个在磁盘上与当前处理的request临近的cfq_queue
 	 */
 	new_cfqq = cfq_close_cooperator(cfqd, cfqq);
 	if (new_cfqq) {
@@ -3124,15 +3127,17 @@ check_group_idle:
 	}
 
 expire:
+/* 将当前cfq_queue设置成超时 */
 	cfq_slice_expired(cfqd, 0);
 new_queue:
 	/*
 	 * Current queue expired. Check if we have to switch to a new
 	 * service tree
+	 如果没有找到一个临近的cfq_queue，那么选择一个新的service tree进行处理
 	 */
 	if (!new_cfqq)
 		cfq_choose_cfqg(cfqd);
-
+	/* 初始化一个调度处理的cfq_queue */
 	cfqq = cfq_set_active_queue(cfqd, new_cfqq);
 keep_queue:
 	return cfqq;

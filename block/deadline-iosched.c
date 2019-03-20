@@ -22,7 +22,7 @@ static const int write_expire = 5 * HZ; /* ditto for writes, these limits are SO
 static const int writes_starved = 2;    /* max times reads can starve a write */
 static const int fifo_batch = 16;       /* # of sequential requests treated as one
 				     by the above parameters. For throughput. */
-
+//Deadline调度器需要处理的核心数据结构是deadline_data
 struct deadline_data {
 	/*
 	 * run time data
@@ -31,22 +31,30 @@ struct deadline_data {
 	/*
 	 * requests (deadline_rq s) are present on both sort_list and fifo_list
 	 */
-	struct rb_root sort_list[2];	
+	/* 采用红黑树管理所有的request，请求地址作为索引值 */
+	struct rb_root sort_list[2];
+	/* 采用FIFO队列管理所有的request，所有请求按照时间先后次序排列 */	
 	struct list_head fifo_list[2];
 
 	/*
 	 * next in sort order. read, write or both are NULL
 	 */
+	/* 批量处理请求过程中，需要处理的下一个request */
 	struct request *next_rq[2];
+	/* 计数器：统计当前已经批量处理完成的request */
 	unsigned int batching;		/* number of sequential requests made */
 	sector_t last_sector;		/* head position */
+	/* 计数器：统计写队列是否即将饿死 */
 	unsigned int starved;		/* times reads have starved writes */
 
 	/*
 	 * settings that change how the i/o scheduler behaves
 	 */
+	/* 配置信息：读写请求的超时时间值 */
 	int fifo_expire[2];
+	/* 配置信息：批量处理的request数量 */
 	int fifo_batch;
+	/* 配置信息：写饥饿值 */
 	int writes_starved;
 	int front_merges;
 };
@@ -250,12 +258,13 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 
 	/*
 	 * batches are currently reads XOR writes
+	 请求批量处理入口
 	 */
 	if (dd->next_rq[WRITE])
 		rq = dd->next_rq[WRITE];
 	else
 		rq = dd->next_rq[READ];
-
+	/* 如果批量请求处理存在，并且还没有达到批量请求处理的上限值，那么继续请求的批量处理 */
 	if (rq && dd->batching < dd->fifo_batch)
 		/* we have a next request are still entitled to batch */
 		goto dispatch_request;
@@ -264,10 +273,10 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	 * at this point we are not running a batch. select the appropriate
 	 * data direction (read / write)
 	 */
-
+	/* 优先处理读请求队列 */
 	if (reads) {
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[READ]));
-
+		/* 如果写请求队列存在饿死的现象，那么优先处理写请求队列 */
 		if (writes && (dd->starved++ >= dd->writes_starved))
 			goto dispatch_writes;
 
@@ -279,6 +288,7 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	/*
 	 * there are either no reads or writes have been starved
 	 */
+	/* 没有读请求需要处理，或者写请求队列存在饿死现象 */
 
 	if (writes) {
 dispatch_writes:
@@ -298,6 +308,7 @@ dispatch_find_request:
 	 * we are not running a batch, find best request for selected data_dir
 	 */
 	if (deadline_check_fifo(dd, data_dir) || !dd->next_rq[data_dir]) {
+		/* 如果请求队列中存在即将饿死的request，或者不存在需要批量处理的请求，那么从FIFO队列头获取一个request */
 		/*
 		 * A deadline has expired, the last request was in the other
 		 * direction, or we have run out of higher-sectored requests.
@@ -309,6 +320,7 @@ dispatch_find_request:
 		 * The last req was the same dir and we have a next request in
 		 * sort order. No expired requests so continue on from here.
 		 */
+		/* 继续批量处理，获取需要批量处理的下一个request */
 		rq = dd->next_rq[data_dir];
 	}
 
@@ -318,6 +330,7 @@ dispatch_request:
 	/*
 	 * rq is the selected appropriate request.
 	 */
+/* 将request从调度器中移出，发送至设备 */
 	dd->batching++;
 	deadline_move_request(dd, rq);
 
